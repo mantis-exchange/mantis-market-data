@@ -1,9 +1,10 @@
 # ---------- builder ----------
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 WORKDIR /build
 
-COPY go.mod go.sum ./
+COPY go.mod ./
+COPY go.sum* ./
 RUN go mod download
 
 COPY . .
