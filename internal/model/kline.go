@@ -2,10 +2,20 @@ package model
 
 import (
 	"context"
+	"math/big"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type Ticker struct {
+	Symbol    string `json:"symbol"`
+	LastPrice string `json:"last_price"`
+	High24h   string `json:"high_24h"`
+	Low24h    string `json:"low_24h"`
+	Volume24h string `json:"volume_24h"`
+	Change24h string `json:"change_24h"`
+}
 
 type Kline struct {
 	Symbol    string    `json:"symbol"`
@@ -103,4 +113,60 @@ func (r *KlineRepo) ListTrades(ctx context.Context, symbol string, limit int) ([
 		trades = append(trades, t)
 	}
 	return trades, nil
+}
+
+func (r *KlineRepo) GetTickers(ctx context.Context) ([]Ticker, error) {
+	rows, err := r.pool.Query(ctx, `
+		WITH latest AS (
+			SELECT DISTINCT ON (symbol) symbol, close as last_price
+			FROM klines WHERE interval = '1m'
+			ORDER BY symbol, open_time DESC
+		),
+		stats AS (
+			SELECT symbol,
+				MAX(high) as high_24h,
+				MIN(low) as low_24h,
+				SUM(volume::numeric) as volume_24h,
+				(SELECT open FROM klines k2
+				 WHERE k2.symbol = k1.symbol AND k2.interval = '1h'
+				   AND k2.open_time >= NOW() - INTERVAL '24 hours'
+				 ORDER BY k2.open_time LIMIT 1) as open_24h
+			FROM klines k1
+			WHERE interval = '1h' AND open_time >= NOW() - INTERVAL '24 hours'
+			GROUP BY symbol
+		)
+		SELECT l.symbol, l.last_price,
+			COALESCE(s.high_24h, l.last_price) as high_24h,
+			COALESCE(s.low_24h, l.last_price) as low_24h,
+			COALESCE(s.volume_24h::text, '0') as volume_24h,
+			COALESCE(s.open_24h, l.last_price) as open_24h
+		FROM latest l
+		LEFT JOIN stats s ON l.symbol = s.symbol
+		ORDER BY l.symbol
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tickers []Ticker
+	for rows.Next() {
+		var t Ticker
+		var open24h string
+		if err := rows.Scan(&t.Symbol, &t.LastPrice, &t.High24h, &t.Low24h, &t.Volume24h, &open24h); err != nil {
+			return nil, err
+		}
+		lastF, _, _ := new(big.Float).SetPrec(64).Parse(t.LastPrice, 10)
+		openF, _, _ := new(big.Float).SetPrec(64).Parse(open24h, 10)
+		if lastF != nil && openF != nil && openF.Sign() > 0 {
+			change := new(big.Float).Sub(lastF, openF)
+			change.Quo(change, openF)
+			change.Mul(change, new(big.Float).SetFloat64(100))
+			t.Change24h = change.Text('f', 2)
+		} else {
+			t.Change24h = "0.00"
+		}
+		tickers = append(tickers, t)
+	}
+	return tickers, nil
 }

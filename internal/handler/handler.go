@@ -57,3 +57,12 @@ func (h *Handler) GetDepth(c *gin.Context) {
 	depth := h.depth.Get(symbol)
 	c.JSON(http.StatusOK, depth)
 }
+
+func (h *Handler) GetTickers(c *gin.Context) {
+	tickers, err := h.klineRepo.GetTickers(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"tickers": tickers})
+}

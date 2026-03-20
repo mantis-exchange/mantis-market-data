@@ -50,6 +50,7 @@ func main() {
 		api.GET("/klines", h.GetKlines)
 		api.GET("/trades", h.GetTrades)
 		api.GET("/depth", h.GetDepth)
+		api.GET("/tickers", h.GetTickers)
 	}
 
 	srv := &http.Server{
